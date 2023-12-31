@@ -68,6 +68,7 @@ async function addLabel(gmail) {
   });
 
   my_label_id = res.data.id;
+  console.log(my_label_id);
 }
 
 async function checkLabel(gmail) {
@@ -76,16 +77,16 @@ async function checkLabel(gmail) {
   });
 
   const labelsArray = res.data.labels;
-  labelsArray.forEach((label_name) => {
-    if (label_name.name === my_label_name) {
-      my_label_id = label_name.id;
-    }
-    if (my_label_id != null) return;
-  });
+  const existingLabel = labelsArray.find(
+    (label) => label.name === my_label_name
+  );
 
-  if (my_label_id != null) return;
-
-  await addLabel(gmail);
+  if (!existingLabel) {
+    await addLabel(gmail);
+  }
+  else{
+    my_label_id = existingLabel.id;
+  }
 }
 
 async function seenUpto(gmail) {
@@ -107,7 +108,9 @@ async function markLabel(gmail, threadId) {
     },
   });
 
-  console.log(`Replied to New Thread Succesfully and marked label as ${my_label_name}`)
+  console.log(
+    `Replied to New Thread Succesfully and marked it's label as ${my_label_name}`
+  );
 }
 
 async function replyThread(gmail, threadId, senderEmail) {
@@ -115,20 +118,16 @@ async function replyThread(gmail, threadId, senderEmail) {
     `To: ${senderEmail}`,
     "Subject: Out of Office Auto Reply",
     "",
-    "Thank you, for reacing out , I am currently on a vacation. During this time I have limited time to check my email and won't be able to respond promptly",
+    "Thank you for reaching out. I am currently on vacation and have limited access to my email and won't be able to respond promptly",
     " ",
     " ",
-    "Rest assured, I will attend to your email upon my return. Your patience and understanding are greatly appreciated.",
+    "Rest assured, I will attend to your email upon my return.",
     "Regards",
   ];
 
   const email = emailLines.join("\n");
 
-  const raw = Buffer.from(email)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const raw = Buffer.from(email).toString("base64")
 
   const message = await gmail.users.messages.send({
     userId: "me",
@@ -147,43 +146,44 @@ async function ifAlreadyRepliedThread(gmail, threadId) {
     id: threadId,
   });
 
-  const messages = res.data.messages;
+  const messages = res.data.messages || [];
 
   let alreadyReplied = false;
-  for (let i = 0; i < messages.length; i++) {
-    const labelIds = messages[i].labelIds;
+  for (const message of messages) {
+    const labelIds = message.labelIds || [];
 
-    labelIds.forEach((label) => {
-      if (label === "SENT") {
-        alreadyReplied = true;
-      }
-    });
-
-    if (alreadyReplied) return;
+    if (labelIds.includes("SENT")) {
+      alreadyReplied = true;
+      break;
+    }
   }
 
-  const mailHeader = messages[0].payload.headers.find(
-    (header) => header.name === "From"
-  ).value;
-
-  const senderEmail = mailHeader.split("<")[1].split(">")[0];
-  replyThread(gmail, threadId, senderEmail);
+  if(!alreadyReplied){
+    const mailHeader = messages[0]?.payload?.headers?.find(
+      (header) => header.name === "From"
+    ).value;
+    
+    if(mailHeader){
+      const senderEmail = mailHeader.split("<")[1].split(">")[0];
+      replyThread(gmail, threadId, senderEmail);
+    }
+  }
 }
 
 async function replyNewThreads(gmail) {
   let nextPageToken = null;
   let new_seen = null;
 
-  outer: do { 
+  outer: do {
     const response = await gmail.users.threads.list({
       userId: "me",
       maxResults: 10,
       pageToken: nextPageToken,
     });
 
-    const Ids = response.data.threads;
-    for (let i = 0; i < Ids.length; i++) {
-      const currentId = Ids[i].id;
+    const threads = response.data.threads;
+    for (const thread of threads) {
+      const currentId = thread.id;
 
       if (new_seen === null) {
         new_seen = currentId;
@@ -206,26 +206,23 @@ async function checkNewMessages(gmail) {
     userId: "me",
     maxResults: 1,
   });
+
   if (res.data.threads[0].id === seen_upto_mId) {
-    console.log("No new messages found"); 
+    console.log("No new messages found");
     return;
   }
 
   await replyNewThreads(gmail);
 }
 
-async function repeat(gmail) {
-  await checkNewMessages(gmail);
-}
-
 async function run() {
   try {
-    const auth = await authorize();  
+    const auth = await authorize();
     const gmail = await gmailSetup(auth);
     await checkLabel(gmail);
-    await seenUpto(gmail);  
+    await seenUpto(gmail);
     setInterval(async () => {
-      await repeat(gmail);
+      await checkNewMessages(gmail);
     }, 1000 * 5);
   } catch (error) {
     console.error("An error occurred:", error.message);
