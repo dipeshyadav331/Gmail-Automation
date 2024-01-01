@@ -223,7 +223,7 @@ async function run() {
     await seenUpto(gmail);
     setInterval(async () => {
       await checkNewMessages(gmail);
-    }, 1000 * 5);
+    }, 1000 * 60 * 2);
   } catch (error) {
     console.error("An error occurred:", error.message);
   }
