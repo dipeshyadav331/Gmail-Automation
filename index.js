@@ -3,10 +3,12 @@ const path = require("path");
 const process = require("process");
 const { authenticate } = require("@google-cloud/local-auth");
 const { google } = require("googleapis");
+
 const SCOPES = ["https://mail.google.com/"];
 
 const TOKEN_PATH = path.join(process.cwd(), "token.json");
 const CREDENTIALS_PATH = path.join(process.cwd(), "credentials.json");
+
 const my_label_name = "Replied Auto";
 let my_label_id = null;
 let seen_upto_mId = null;
@@ -53,6 +55,7 @@ async function gmailSetup(auth) {
   return google.gmail({ version: "v1", auth });
 }
 
+// adding a label in the user's gmail if it doesn't exists and retrieving the ID of the label
 async function addLabel(gmail) {
   const res = await gmail.users.labels.create({
     userId: "me",
@@ -71,6 +74,8 @@ async function addLabel(gmail) {
   console.log(my_label_id);
 }
 
+// checking if the "REPLIED AUTO" label exists or not , if it doesn't exist then creating it using addLabel function
+// updating the ID of the label given by gmail in the global variable my_label_id
 async function checkLabel(gmail) {
   const res = await gmail.users.labels.list({
     userId: "me",
@@ -89,6 +94,8 @@ async function checkLabel(gmail) {
   }
 }
 
+// the threadId upto which the user has seen the mails before going on vacation/leave.
+// this is checked once just after starting the server.
 async function seenUpto(gmail) {
   const res = await gmail.users.threads.list({
     userId: "me",
@@ -98,6 +105,7 @@ async function seenUpto(gmail) {
   seen_upto_mId = res.data.threads[0].id;
 }
 
+// mark the label of the thread as "Replied Auto" after sending a automated reply to this threadId
 async function markLabel(gmail, threadId) {
   const addLabel = await gmail.users.threads.modify({
     userId: "me",
@@ -113,6 +121,7 @@ async function markLabel(gmail, threadId) {
   );
 }
 
+// sending a automated reply to the sender of the threadId
 async function replyThread(gmail, threadId, senderEmail) {
   const emailLines = [
     `To: ${senderEmail}`,
@@ -140,6 +149,10 @@ async function replyThread(gmail, threadId, senderEmail) {
   await markLabel(gmail, threadId);
 }
 
+// checking if I have already replied to the threadId or not
+// checking messages of threadId and labels of each message
+// if there is a label as "SENT" in the labels array means I have already replied to this thread and won't proceed further
+// finding the sender's mail address from the headers section of the first message of the thread.
 async function ifAlreadyRepliedThread(gmail, threadId) {
   const res = await gmail.users.threads.get({
     userId: "me",
@@ -170,6 +183,9 @@ async function ifAlreadyRepliedThread(gmail, threadId) {
   }
 }
 
+// checking for new threads and replying to them
+// handling the case of arrival of multiple mails using do while loop
+// updating the threadId upto which we have seen the mails
 async function replyNewThreads(gmail) {
   let nextPageToken = null;
   let new_seen = null;
@@ -201,6 +217,8 @@ async function replyNewThreads(gmail) {
   } while (nextPageToken);
 }
 
+// checking if there are any new messages by comparing the threadId of the latest message
+// with the threadId upto which we have seen the mails.
 async function checkNewMessages(gmail) {
   const res = await gmail.users.threads.list({
     userId: "me",
@@ -219,11 +237,18 @@ async function run() {
   try {
     const auth = await authorize();
     const gmail = await gmailSetup(auth);
+
+    // checking if label exists and adding the label if it doesn't exists
     await checkLabel(gmail);
+
+    // seeing the threadId upto which the user has seen the mails.
     await seenUpto(gmail);
+
+    // fetching new mails and replying to them if not already replied and adding label to them
     setInterval(async () => {
       await checkNewMessages(gmail);
     }, 1000 * 60 * 2);
+
   } catch (error) {
     console.error("An error occurred:", error.message);
   }
